@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ph.Live - Philippine Live TV Streaming</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HLS.js for real .m3u8 live streaming -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <!-- DASH.js for MPEG-DASH (.mpd) streams -->
+    <script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+    <!-- Google Fonts: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            blue: '#2997ff',
+                            red: '#ef233c',
+                            dark: '#050505',
+                            card: '#111215',
+                            border: '#22242a'
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+    <style>
+        body {
+            background-color: #050505;
+            color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* Splash Screen Glow & Progress Animations */
+        @keyframes pulseGlow {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 28px rgba(41, 151, 255, 0.35), 0 0 48px rgba(239, 35, 60, 0.25);
+            }
+            50% {
+                transform: scale(1.06);
+                box-shadow: 0 0 44px rgba(41, 151, 255, 0.6), 0 0 70px rgba(239, 35, 60, 0.45);
+            }
+        }
+
+        @keyframes progressBar {
+            0% { width: 0%; }
+            55% { width: 74%; }
+            100% { width: 100%; }
+        }
+
+        .splash-logo-ring {
+            animation: pulseGlow 2s ease-in-out infinite;
+        }
+
+        .splash-progress-fill {
+            animation: progressBar 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+
+        /* Live status dot pulse */
+        @keyframes liveDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .live-dot {
+            animation: liveDot 1.25s ease-in-out infinite;
+        }
+
+        /* Toast notification transitions */
+        .toast-enter {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .toast-exit {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+    </style>
+</head>
+<body class="bg-[#050505] text-gray-100 min-h-screen selection:bg-brand-blue/30 selection:text-white">
+
+    <!-- 1. Animated Intro Splash Screen -->
+    <div id="splashScreen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#050505] transition-opacity duration-500 px-6">
+        <div class="relative flex flex-col items-center">
+            <div class="splash-logo-ring w-24 h-24 rounded-3xl bg-gradient-to-br from-[#121826] via-[#0e1118] to-[#1d0d13] border border-white/15 flex items-center justify-center mb-5">
+                <!-- Glowing Broadcast Pulse SVG Emblem -->
+                <svg class="w-12 h-12" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="7" fill="#ef233c"/>
+                    <path d="M21 21C17.9 24.1 16 27.9 16 32C16 36.1 17.9 39.9 21 43" stroke="#2997ff" stroke-width="3.5" stroke-linecap="round"/>
+                    <path d="M43 21C46.1 24.1 48 27.9 48 32C48 36.1 46.1 39.9 43 43" stroke="#2997ff" stroke-width="3.5" stroke-linecap="round"/>
+                    <path d="M14 14C9.2 18.8 6 25.1 6 32C6 38.9 9.2 45.2 14 50" stroke="#ef233c" stroke-opacity="0.8" stroke-width="3" stroke-linecap="round"/>
+                    <path d="M50 14C54.8 18.8 58 25.1 58 32C58 38.9 54.8 45.2 50 50" stroke="#ef233c" stroke-opacity="0.8" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+            </div>
+
+            <div class="text-4xl font-extrabold tracking-tight flex items-baseline">
+                <span class="text-[#2997ff]">Ph</span><span class="text-white">.</span><span class="text-[#ef233c]">Live</span>
+            </div>
+            <p class="text-xs uppercase tracking-[0.25em] text-gray-400 mt-2 font-medium">Live TV &amp; News Streaming</p>
+
+            <!-- Loading Bar -->
+            <div class="w-56 h-1.5 bg-white/10 rounded-full overflow-hidden mt-7">
+                <div class="splash-progress-fill h-full bg-gradient-to-r from-[#2997ff] to-[#ef233c] rounded-full"></div>
+            </div>
+
+            <!-- Skip Intro Button -->
+            <button id="skipSplashBtn" type="button"
+                class="mt-6 px-4 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition">
+                Skip Intro
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Application Wrapper -->
+    <div id="mainApp" class="max-w-4xl mx-auto px-4 sm:px-6 pb-16 pt-4 opacity-0 transition-opacity duration-500">
+
+        <!-- 2. Top Header & Navigation -->
+        <header class="flex items-center justify-between mb-4">
+            <button id="homeLogoBtn" type="button" class="flex items-center gap-2 focus:outline-none group" title="Switch to Default Channel">
+                <span class="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                    <span class="text-[#2997ff] group-hover:brightness-110 transition">Ph</span><span class="text-white">.</span><span class="text-[#ef233c] group-hover:brightness-110 transition">Live</span>
+                </span>
+            </button>
+
+            <div class="flex items-center gap-2">
+                <button id="refreshStreamBtn" type="button" aria-label="Reload Stream" title="Reload Active Stream"
+                    class="p-3 rounded-xl bg-[#111215] hover:bg-[#191b20] border border-white/10 text-gray-200 transition active:scale-95">
+                    <svg id="refreshIcon" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                </button>
+                <button id="openSettingsBtn" type="button" aria-label="Settings & M3U Importer" title="Stream Settings & M3U Importer"
+                    class="p-3 rounded-xl bg-[#111215] hover:bg-[#191b20] border border-white/10 text-gray-200 transition active:scale-95">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- 3. Live Video Player Section -->
+        <section aria-label="Live Video Player" class="mb-5">
+            <div id="playerContainer" class="relative w-full aspect-video rounded-2xl overflow-hidden bg-[#0c0d10] border border-white/10 shadow-2xl">
+                <!-- HTML5 Video Element for HLS (.m3u8) -->
+                <video id="liveVideo" class="w-full h-full object-contain bg-black" playsinline autoplay muted></video>
+
+                <!-- YouTube Live Embed Iframe -->
+                <iframe id="youtubePlayer" class="hidden w-full h-full bg-black border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen></iframe>
+
+                <!-- Fallback Broadcast Visualizer Canvas -->
+                <canvas id="fallbackCanvas" class="hidden w-full h-full block"></canvas>
+
+                <!-- Top-left LIVE Badge & Resolution/Protocol Status -->
+                <div class="absolute top-3 left-3 flex items-center gap-2 z-10 pointer-events-none">
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#ef233c] text-white text-xs font-bold tracking-wider uppercase shadow">
+                        <span class="w-2 h-2 rounded-full bg-white live-dot"></span>
+                        LIVE
+                    </span>
+                    <span id="playerStreamBadge" class="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md border border-white/15 text-[11px] text-gray-200 font-medium">
+                        HLS .m3u8
+                    </span>
+                </div>
+
+                <!-- Top-right Quick Player Controls (Play/Pause, Mute/Unmute, Fullscreen) -->
+                <div id="hlsQuickControls" class="absolute top-3 right-3 flex items-center gap-1.5 z-10">
+                    <button id="playPauseBtn" type="button" title="Play / Pause" aria-label="Play or Pause"
+                        class="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white transition active:scale-95">
+                        <svg id="playPauseIcon" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z"/>
+                        </svg>
+                    </button>
+                    <button id="muteToggleBtn" type="button" title="Mute / Unmute" aria-label="Toggle Mute"
+                        class="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white transition active:scale-95">
+                        <svg id="muteIcon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                        </svg>
+                    </button>
+                    <button id="fullscreenBtn" type="button" title="Fullscreen" aria-label="Toggle Fullscreen"
+                        class="p-2.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white transition active:scale-95">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Bottom Info Overlay -->
+                <div id="playerBottomOverlay" class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-4 py-3 pointer-events-none">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                            <p id="playerChannelNameOverlay" class="text-sm sm:text-base font-bold text-white truncate">Philippine Movie Channels (Cinema One / Viva TV)</p>
+                            <p id="playerStatusText" class="text-xs text-gray-300 mt-0.5 truncate">Connecting to live stream...</p>
+                        </div>
+                        <span id="playerGroupTag" class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white/10 text-gray-200 shrink-0">
+                            PH &amp; Sports
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Active Channel Title Below Player & Info Link -->
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <div class="min-w-0 flex items-center gap-2.5">
+                <h1 id="activeChannelHeading" class="text-xl sm:text-2xl font-extrabold tracking-tight text-white truncate">Philippine Movie Channels (Cinema One / Viva TV)</h1>
+                <a id="channelGuideLink" href="https://ent.abs-cbn.com/articles-news/everything-you-need-to-know-about-kapamilya-channel-12340" target="_blank" rel="noopener noreferrer"
+                    class="hidden px-2.5 py-1 rounded-lg bg-[#2997ff]/15 hover:bg-[#2997ff]/25 border border-[#2997ff]/30 text-[11px] font-semibold text-[#60b0ff] transition shrink-0">
+                    Program Guide ↗
+                </a>
+            </div>
+            <span id="channelCountLabel" class="text-xs font-medium text-gray-400 shrink-0">0 Channels</span>
+        </div>
+
+        <!-- 4. Search & Filter Controls -->
+        <div class="relative mb-4">
+            <svg class="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input id="searchInput" type="text" placeholder="Search channels (e.g. Cinema One, Viva TV, ABS-CBN, Abante)..." autocomplete="off"
+                class="w-full pl-11 pr-10 py-3 rounded-2xl bg-[#111215] border border-white/10 focus:border-[#2997ff] focus:outline-none text-sm sm:text-base text-white placeholder-gray-500 transition" />
+            <button id="clearSearchBtn" type="button" aria-label="Clear search"
+                class="hidden absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-white">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- Filter Pills -->
+        <div class="flex flex-wrap items-center gap-2.5 mb-6">
+            <button id="filterAllBtn" type="button" data-filter="all"
+                class="filter-pill px-5 py-2.5 rounded-full text-sm font-semibold bg-[#ef233c] text-white shadow transition">
+                All
+            </button>
+            <button id="filterFavoritesBtn" type="button" data-filter="favorites"
+                class="filter-pill px-5 py-2.5 rounded-full text-sm font-semibold bg-transparent border border-white/15 text-gray-300 hover:border-white/30 hover:text-white transition">
+                Favorites
+            </button>
+            <button id="filterPhNewsBtn" type="button" data-filter="ph_news"
+                class="filter-pill px-5 py-2.5 rounded-full text-sm font-semibold bg-transparent border border-white/15 text-gray-300 hover:border-white/30 hover:text-white transition">
+                PH &amp; Sports
+            </button>
+            <button id="filterM3uBtn" type="button" data-filter="m3u"
+                class="filter-pill px-5 py-2.5 rounded-full text-sm font-semibold bg-transparent border border-white/15 text-gray-300 hover:border-white/30 hover:text-white transition">
+                M3U Playlist
+            </button>
+        </div>
+
+        <!-- 5. Complete Channel Grid -->
+        <div class="flex items-center justify-between mb-3.5">
+            <h2 class="text-xs font-bold uppercase tracking-[0.14em] text-gray-400">CHANNELS</h2>
+            <button id="quickAddM3uBtn" type="button" class="text-xs font-semibold text-[#2997ff] hover:underline">
+                + Paste M3U / Add Channel
+            </button>
+        </div>
+
+        <div id="channelsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5 sm:gap-4"></div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="hidden text-center py-12 px-4 rounded-2xl bg-[#111215] border border-white/10 mt-4">
+            <p class="text-base font-semibold text-gray-200">No channels found</p>
+            <p class="text-xs text-gray-400 mt-1">Try another search keyword or switch back to the All filter.</p>
+        </div>
+    </div>
+
+    <!-- 6. Settings & M3U Importer Modal -->
+    <div id="settingsModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div class="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-[#111215] border border-white/15 shadow-2xl overflow-hidden">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+                <div>
+                    <h3 class="text-lg font-bold text-white">Settings &amp; M3U Playlist Importer</h3>
+                    <p class="text-xs text-gray-400">Edit channel stream URLs or paste an #EXTM3U playlist to import channels.</p>
+                </div>
+                <button id="closeSettingsBtn" type="button" aria-label="Close modal"
+                    class="p-2 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Modal Tabs -->
+            <div class="flex border-b border-white/10 bg-[#0b0c0f] px-5 pt-2 gap-2">
+                <button id="tabEditUrlsBtn" type="button"
+                    class="px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-[#2997ff] text-white transition">
+                    Channel Stream URLs
+                </button>
+                <button id="tabImportM3uBtn" type="button"
+                    class="px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-gray-400 hover:text-white transition">
+                    Paste M3U Playlist / Add Channel
+                </button>
+            </div>
+
+            <!-- Tab 1: Edit Existing Channel Stream URLs -->
+            <div id="tabEditUrlsPanel" class="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1"></div>
+
+            <!-- Tab 2: Paste Raw #EXTM3U Playlist or Add Single Channel -->
+            <div id="tabImportM3uPanel" class="hidden p-4 sm:p-5 overflow-y-auto space-y-5 flex-1">
+                <!-- Single Channel Quick Add -->
+                <div class="p-4 rounded-xl bg-[#0b0c0f] border border-white/10 space-y-3">
+                    <h4 class="text-sm font-bold text-white">Add Single Custom Channel</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <input id="customChName" type="text" placeholder="Channel Name (e.g. Kapamilya HD)"
+                            class="px-3.5 py-2.5 rounded-xl bg-[#14161c] border border-white/10 focus:border-[#2997ff] focus:outline-none text-xs text-white placeholder-gray-500" />
+                        <input id="customChGroup" type="text" placeholder="Group (e.g. PH & Sports)"
+                            class="px-3.5 py-2.5 rounded-xl bg-[#14161c] border border-white/10 focus:border-[#2997ff] focus:outline-none text-xs text-white placeholder-gray-500" />
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input id="customChUrl" type="url" placeholder="https://example.com/live/stream.m3u8 or YouTube Live URL"
+                            class="flex-1 px-3.5 py-2.5 rounded-xl bg-[#14161c] border border-white/10 focus:border-[#2997ff] focus:outline-none text-xs text-white placeholder-gray-500" />
+                        <button id="addSingleChannelBtn" type="button"
+                            class="px-4 py-2.5 rounded-xl text-xs font-semibold bg-[#2997ff] hover:bg-[#1f84e5] text-white transition shrink-0">
+                            Add &amp; Play
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Raw #EXTM3U Text Importer -->
+                <div class="p-4 rounded-xl bg-[#0b0c0f] border border-white/10 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h4 class="text-sm font-bold text-white">Paste Raw #EXTM3U Playlist</h4>
+                        <span class="text-[11px] text-gray-400">Supports #EXTINF, .m3u8 &amp; YouTube links</span>
+                    </div>
+                    <textarea id="rawM3uInput" rows="7"
+                        placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-logo=&quot;https://...&quot; group-title=&quot;News&quot;,Channel Name&#10;https://example.com/stream.m3u8"
+                        class="w-full p-3 rounded-xl bg-[#14161c] border border-white/10 focus:border-[#2997ff] focus:outline-none text-xs font-mono text-gray-200 placeholder-gray-600"></textarea>
+                    <div class="flex flex-wrap items-center justify-end gap-2">
+                        <button id="appendM3uBtn" type="button"
+                            class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition">
+                            Append to Channels
+                        </button>
+                        <button id="replaceM3uBtn" type="button"
+                            class="px-4 py-2 rounded-xl text-xs font-semibold bg-[#ef233c] hover:bg-[#d91e36] text-white transition">
+                            Replace Playlist
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5 border-t border-white/10 bg-[#0c0d10]">
+                <button id="resetAllBtn" type="button"
+                    class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 transition">
+                    Reset All Defaults
+                </button>
+                <button id="doneSettingsBtn" type="button"
+                    class="px-5 py-2 rounded-xl text-xs font-semibold bg-[#2997ff] hover:bg-[#1f84e5] text-white transition">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Non-intrusive Toast Notification -->
+    <div id="toastNotification"
+        class="fixed bottom-5 right-5 z-50 pointer-events-none toast-exit transition-all duration-300 px-4 py-2.5 rounded-xl bg-[#181a20] border border-white/15 text-xs sm:text-sm font-medium text-white shadow-xl">
+    </div>
+
+    <script>
+        (function () {
+            const STORAGE_CHANNELS_KEY = "phlive_channels_v5";
+            const STORAGE_FAVS_KEY = "phlive_favorites_v4";
+
+            // Default M3U Playlist including Philippine Movie Channels (Cinema One, Cinema One Global & Viva TV), Kapamilya Channel / ABS-CBN, Abante TV, and more
+            const DEFAULT_M3U_RAW = `#EXTM3U
+#EXTINF:-1 tvg-id="PHMovieChannels.ph@HD" tvg-logo="https://upload.wikimedia.org/wikipedia/en/thumb/5/59/Cinema_One_logo.svg/512px-Cinema_One_logo.svg.png" group-title="PH & Sports;Movies",Philippine Movie Channels: Cinema One, Cinema One Global and Viva TV #1322
+http://4ce5e2d62ee2c10e43c709f9b87c44d5.streamhost.cc/m3u8/Philippines/cd1b220644affbb.m3u8
+
+#EXTINF:-1 tvg-id="KapamilyaChannel.ph@HD" tvg-logo="https://upload.wikimedia.org/wikipedia/en/thumb/3/3e/Kapamilya_Channel_logo.svg/512px-Kapamilya_Channel_logo.svg.png" info-url="https://ent.abs-cbn.com/articles-news/everything-you-need-to-know-about-kapamilya-channel-12340" group-title="PH & Sports;Entertainment",Kapamilya Channel / ABS-CBN Live
+https://www.youtube.com/live/CIyaIRLsw0U?si=7eI1ucdPVRSP7Yn4
+
+#EXTINF:-1 tvg-id="AbanteTV.ph@HD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/d/d9/Abante_masthead.svg" group-title="PH & Sports;News",Abante TV (1080p)
+https://amg19223-amg19223c12-amgplt0352.playout.now3.amagi.tv/playlist/amg19223-amg19223c12-amgplt0352/playlist.m3u8
+
+#EXTINF:-1 tvg-id="SportsLive.ph@HD" tvg-logo="" group-title="PH & Sports",Sports Live HD
+https://live-stats.clipstat.com/infi-stream/sports/out.m3u8
+
+#EXTINF:-1 tvg-id="2GB.au@SD" tvg-logo="https://i.ibb.co/jwM8DFG/2GB-1.png" group-title="News",2GB (1080p)
+https://2gblive.akamaized.net/hls/live/2033805/2GB/index.m3u8
+
+#EXTINF:-1 tvg-id="3AW.au@SD" tvg-logo="https://i.imgur.com/Z4MdB0S.png" group-title="News",3AW (1080p)
+https://3awlive.akamaized.net/hls/live/2032295/3AW/index.m3u8
+
+#EXTINF:-1 tvg-id="3CatInfo.es@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/3CatInfo_logo.svg/960px-3CatInfo_logo.svg.png" group-title="News;Public",3CatInfo (1080p)
+https://directes-tv-int.3catdirectes.cat/live-origin/canal324-hls/master.m3u8
+
+#EXTINF:-1 tvg-id="4DmasNoticiasTV.py@SD" tvg-logo="https://i.ibb.co/1fb5BtN/unnamed.png" group-title="News",4Dmas Noticias TV (1080p)
+https://rds3.desdeparaguay.net/4dmasnoticiastv/4dmasnoticiastv/playlist.m3u8
+
+#EXTINF:-1 tvg-id="4TVNews.in@SD" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/4_TV.png" group-title="News",4TV News (576p)
+https://fta.ektv.in/live/647/master.m3u8
+
+#EXTINF:-1 tvg-id="6PR.au@SD" tvg-logo="https://i.imgur.com/Q9iCxg1.png" group-title="News",6PR (1080p)
+https://6prlive.akamaized.net/hls/live/2033806/6PR/index.m3u8
+
+#EXTINF:-1 tvg-id="6TVTelugu.in@SD" tvg-logo="https://i.imgur.com/l3EcRnZ.png" group-title="News",6 TV Telugu (576p)
+https://mumbai-edge.smartplaytv.in/6TVTelugu/index.m3u8
+
+#EXTINF:-1 tvg-id="7Info.ci@SD" tvg-logo="https://i.imgur.com/jcl1nNR.png" group-title="News",7 Info
+https://video1.getstreamhosting.com:1936/8042/8042/playlist.m3u8
+
+#EXTINF:-1 tvg-id="9PlusNews.in@SD" tvg-logo="https://jiotvimages.cdn.jio.com/dare_images/images/9plusnews.png" group-title="News",9 Plus News (1080p)
+https://stream.ottlive.co.in/9plusnews/index.m3u8
+
+#EXTINF:-1 tvg-id="10TV.in@SD" tvg-logo="https://xstreamcp-assets-msp.streamready.in/assets/LIVETV/LIVECHANNEL/LIVETV_LIVETVCHANNEL_10TV/images/LOGO_HD/image.png" group-title="News",10 TV (720p)
+https://mumbai-edge.smartplaytv.in/10TV/index.m3u8
+
+#EXTINF:-1 tvg-id="13SiamThai.th@SD" tvg-logo="https://i.imgur.com/FvEp1S2.png" group-title="News",13 Siam Thai (1080p)
+https://live.x2.co.th/live/13livetv-th.m3u8
+
+#EXTINF:-1 tvg-id="247CanaldeNoticias.ar@SD" tvg-logo="https://i.imgur.com/4hDCB1M.png" group-title="News",24/7 Canal de Noticias (360p)
+https://panel.host-live.com:19360/cn247tv/cn247tv.m3u8
+
+#EXTINF:-1 tvg-id="24Horas.es@SD" tvg-logo="https://i.ibb.co/21sXZ3GT/24h.png" group-title="News;Public",24 Horas (720p)
+https://rtvelivestream.rtve.es/rtvesec/24h/24h_main_dvr.m3u8
+
+#EXTINF:-1 tvg-id="24HorasCatalunya.es@SD" tvg-logo="https://i.ibb.co/21sXZ3GT/24h.png" group-title="News;Public",24 Horas Catalunya (720p)
+https://rtvelivestream.rtve.es/rtvesec/cat/24h_cat_main_dvr.m3u8
+
+#EXTINF:-1 tvg-id="24Kanal.ua@SD" tvg-logo="https://pbs.twimg.com/profile_images/1498285886714298374/EMSJzC-0_400x400.jpg" group-title="News",24 Kanal (720p)
+https://cdn15.live-tv.cloud/ua_infinitas_tv/news24-abr/playlist.m3u8
+
+#EXTINF:-1 tvg-id="24KZ.kz@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/7/76/24KZ_logo.svg/1280px-24KZ_logo.svg.png" group-title="News",24KZ (576p)
+https://fs.uplink.kz/24KZ/mono.m3u8?token=onlinetv
+
+#EXTINF:-1 tvg-id="24News.in@SD" tvg-logo="https://sund-images.sunnxt.com/202222/300x300_24News_202222_d63feca0-79ae-47ea-b75a-66c17d456f4c.png" group-title="News",24 News (576p)
+https://mumt07.tangotv.in/zHjX9OFlTWENTYFOURNEWS/index.m3u8
+
+#EXTINF:-1 tvg-id="24NewsHD.pk@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/en/9/93/24_News_HD_Logo.png" group-title="News",24 News HD
+https://cdn4.mjunoon.tv:8087/streamtest/146M/chunks.m3u8
+
+#EXTINF:-1 tvg-id="24TV.tr@SD" tvg-logo="https://i.imgur.com/8FO41es.png" group-title="News",24 TV (720p)
+https://turkmedya-live.ercdn.net/tv24/tv24.m3u8
+
+#EXTINF:-1 tvg-id="30AGeorgiaHollywoodReview.us@SD" tvg-logo="https://images.axios.com/JiG3RuYBwpU_WZFeU6HHjt03FAU=/111x0:1191x1080/320x320/2023/11/09/1699558891265.jpg" group-title="Entertainment;News",30A Georgia Hollywood Review (720p)
+https://30a-tv.com/gh.m3u8
+
+#EXTINF:-1 tvg-id="30ALionelNation.us@SD" tvg-logo="https://m.media-amazon.com/images/I/71dgsQwVcNL.png" group-title="News",30A Lionel Nation
+https://30a-tv.com/ln.m3u8
+
+#EXTINF:-1 tvg-id="30ALoomeredTV.us@SD" tvg-logo="https://cbs12.com/resources/media/0c1ecad8-fb09-4bb2-beaa-fc561dfe624a-small21x9_LoomerStill.jpg?1603419052801" group-title="Documentary;News",30A Loomered TV
+https://30a-tv.com/loomer.m3u8
+
+#EXTINF:-1 tvg-id="99TV.in@SD" tvg-logo="https://i.imgur.com/dZA4gel.png" group-title="News",99TV (720p)
+https://cdn.pishow.tv/ott/live/1211/master.m3u8
+
+#EXTINF:-1 tvg-id="360.HD.tr" tvg-logo="https://i.imgur.com/agn47sQ.png" group-title="News",360 (720p)
+https://turkmedya-live.ercdn.net/tv360/tv360.m3u8
+
+#EXTINF:-1 tvg-id="A2CNN.al@SD" tvg-logo="https://i.imgur.com/TgO3Lzi.png" group-title="News",A2 CNN
+https://tv.a2news.com/live/smil:a2cnnweb.stream.smil/playlist.m3u8
+
+#EXTINF:-1 tvg-id="A24Paraguay.py@SD" tvg-logo="https://i.imgur.com/XWBmjBk.png" group-title="News",A24 Paraguay (1080p)
+https://a24-live.argosworkspace.com/a24/index.m3u8
+
+#EXTINF:-1 tvg-id="A.HABER.HD.tr" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/7/7c/Ahaber_Logo.png" group-title="News",A Haber (1080p)
+https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/ahaber/ahaber.m3u8
+
+#EXTINF:-1 tvg-id="Aaj.Tak.in" tvg-logo="https://xstreamcp-assets-msp.streamready.in/assets/LIVETV/LIVECHANNEL/LIVETV_LIVETVCHANNEL_AAJ_TAK/images/LOGO_HD/image.png" group-title="News",Aaj Tak HD (1080p)
+https://feeds.intoday.in/aajtak/api/aajtakhd/master.m3u8
+
+#EXTINF:-1 tvg-id="ABCNews.au@Sydney" tvg-logo="https://i.imgur.com/BrW7gk8.png" group-title="News",ABC News (720p)
+https://abc-news-dmd-streams-1.akamaized.net/out/v1/701126012d044971b3fa89406a440133/index.m3u8
+
+#EXTINF:-1 tvg-id="ABCNewsLive1.us@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/6/63/ABC_News_Live_logo_2021.svg/960px-ABC_News_Live_logo_2021.svg.png" group-title="News",ABC News Live (720p)
+https://abcnews-streams.akamaized.net/hls/live/2023560/abcnewshudson1/master.m3u8
+
+#EXTINF:-1 tvg-id="ABPNews.in@SD" tvg-logo="https://dtil.tmsimg.com/assets/s158138_ld_h15_aa.png?lock=720x540" group-title="News",ABP News (1080p)
+https://abpmitv.akamaized.net/hls/live/2042842/abpnews/master.m3u8
+
+#EXTINF:-1 tvg-id="ADN40.mx@SD" tvg-logo="https://i.imgur.com/Og17U9N.png" group-title="News",ADN 40 (720p)
+https://mdstrm.com/live-stream-playlist/60b578b060947317de7b57ac.m3u8
+
+#EXTINF:-1 tvg-id="AfghanistanInternational.uk@SD" tvg-logo="https://i.imgur.com/r8MmFRX.png" group-title="News",Afghanistan International (720p)
+https://hls.afintl.com/hls/stream.m3u8
+
+#EXTINF:-1 tvg-id="Africa24.fr@SD" tvg-logo="https://africa24tv.com/wp-content/uploads/2021/09/logo.png" group-title="News",Africa 24 (1080p)
+https://africa24.vedge.infomaniak.com/livecast/ik:africa24/manifest.m3u8
+
+#EXTINF:-1 tvg-id="AfricanewsEnglish.fr@SD" tvg-logo="https://i.imgur.com/5UxU4zc.png" group-title="News",Africanews English (720p)
+https://cdn-euronews.akamaized.net/live/eds/africanews-en/25049/index.m3u8
+
+#EXTINF:-1 tvg-id="AlArabiyaEnglish.sa@SD" tvg-logo="https://shahid.mbc.net/mediaObject/7cfc0baf-1201-477f-b722-d3099fafe17f?height=230&width=512&croppingPoint=&version=1&type=png" group-title="News",Al Arabiya English (1080p)
+https://live.alarabiya.net/alarabiapublish/english/playlist_dvr.m3u8
+
+#EXTINF:-1 tvg-id="AlArabyTV.qa@SD" tvg-logo="https://i.imgur.com/YMqWEe4.png" group-title="News",Al Araby TV (1080p)
+https://live.kwikmotion.com/alaraby1live/alaraby_abr/playlist.m3u8
+
+#EXTINF:-1 tvg-id="AlEkhbariya.sa@SD" tvg-logo="https://i.imgur.com/WcRlHQm.png" group-title="News",Al Ekhbariya (1080p)
+https://shd-gcp-live.edgenextcdn.net/live/bitmovin-al-ekhbaria/297b3ef1cd0633ad9cfba7473a686a06/index.m3u8
+
+#EXTINF:-1 tvg-id="AlJazeera.qa@English" tvg-logo="https://i.imgur.com/7bRVpnu.png" group-title="News",Al Jazeera English (1080p)
+https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8
+
+#EXTINF:-1 tvg-id="AlJazeeraMubasher.qa@SD" tvg-logo="https://i.imgur.com/X80DQvF.png" group-title="News",Al Jazeera Mubasher (1080p)
+https://live-hls-apps-ajm-fa.getaj.net/AJM/index.m3u8
+
+#EXTINF:-1 tvg-id="ArirangTV.kr@SD" tvg-logo="https://i.imgur.com/Asu5pE9.png" group-title="General;News",Arirang TV (1080p)
+https://amdlive-ch02-ctnd-com.akamaized.net/arirang_2ch/smil:arirang_2ch.smil/playlist.m3u8
+
+#EXTINF:-1 tvg-id="AsharqNews.sa@SD" tvg-logo="https://i.imgur.com/bqRC3sl.png" group-title="Business;News",Asharq News (1080p)
+https://live-news.asharq.com/asharq.m3u8
+
+#EXTINF:-1 tvg-id="B1.ro@SD" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/5/57/B1_TV_logo.svg/960px-B1_TV_logo.svg.png" group-title="News",B1
+https://hls02ns.antenaplay.ro/hls/b1-tv-hd/index.m3u8
+
+#EXTINF:-1 tvg-id="BakuTV.az@SD" tvg-logo="https://i.imgur.com/r4FzxSg.png" group-title="News",Baku.TV
+https://rtmp.baku.tv/hls/bakutv.m3u8
+
+#EXTINF:-1 tvg-id="Bansal.News.in" tvg-logo="https://xstreamcp-assets-msp.streamready.in/assets/LIVETV/LIVECHANNEL/LIVETV_LIVETVCHANNEL_BANSAL_NEWS/images/LOGO_HD/image.png" group-title="News",Bansal News (1080p)
+https://d3qs3d2rkhfqrt.cloudfront.net/out/v1/4f8d92312b9a4783bbd706cf7ed86085/index.m3u8
+
+#EXTINF:-1 tvg-id="BBCNews.uk@SouthAsia" tvg-logo="https://xstreamcp-assets-msp.streamready.in/assets/LIVETV/LIVECHANNEL/LIVETV_LIVETVCHANNEL_BBC_NEWS/images/LOGO_HD/image.png" group-title="News",BBC News South Asia (720p)
+https://mumbai-edge.smartplaytv.in/BBCNews/index.m3u8 
+
+#EXTINF:-1 group-title="Korean",Korean Central Television (KCTV) (1080i) [Not 24/7]
+https://stream.intchoson.com/kctv/index.m3u8
+#EXTINF:-1 group-title="Korean",Sports Television [Not 24/7]
+https://kctv.koryofront.org/stream/sports/index.m3u8
+#EXTINF:-1 group-title="Korean",Ryongnamsan Television SD [Not 24/7]
+https://kctv.koryofront.org/stream/ryongnamsan/index.m3u8
+#EXTINF:-1 group-title="Philippines",Mindanow Network TV
+https://streams.comclark.com/overlay/mindanow/playlist.m3u8
+#EXTINF:-1 group-title="News",BBC News Asia Pacific (720p)
+https://cdn4.skygo.mn/live/disk1/BBC_News/HLSv3-FTA/BBC_News.m3u8
+#EXTINF:-1 group-title="Philippines",CLTV 36 (720p) [Not 24/7]
+https://live.cltv36.tv:5443/LiveApp/streams/cltvlive.m3u8
+#EXTINF:-1 group-title="News",Bilyonario News Channel (720p) [Geo-blocked]
+https://amg19223-amg19223c11-amgplt0352.playout.now3.amagi.tv/playlist/amg19223-amg19223c11-amgplt0352/playlist.m3u8
+#EXTINF:-1 group-title="Religion",EWTN Asia-Pacific (720p) [Not 24/7]
+https://cdn3.wowza.com/1/QmVNUVhTNTZSS3Uz/YWQ0aHpi/hls/live/playlist.m3u8
+#EXTINF:-1 group-title="Religion",INC TV (720p) [Geo-blocked]
+https://199211.global.ssl.fastly.net/643cc12aa824db4374021c8c/live_95f6ac80dd6511ed9d08b12be56ae55e/index.m3u8
+#EXTINF:-1 group-title="Philippines",PTV (720p) [Not 24/7]
+https://raw.githubusercontent.com/azgaresncf/strm2hls/main/streams/PTV.m3u8
+#EXTINF:-1 group-title="International",TV5 Monde Asia (Asie) (1080p) [Geo-blocked]
+https://ott.tv5monde.com/Content/HLS/Live/channel(seasie)/variant.m3u8
+#EXTINF:-1 group-title="International",TV5Monde Pacifique (1080p) [Geo-blocked]
+https://ott.tv5monde.com/Content/HLS/Live/channel(pacifique)/variant.m3u8
+#EXTINF:-1 group-title="International",TVE Internacional Asia-Oceania [Geo-blocked]
+https://rtvelivestream.akamaized.net/rtvesec/int/tvei_asia_main.m3u8
+#EXTINF:-1 group-title="International",TVE Internacional Europe-Asia [Geo-blocked]
+https://rtvelivestream.akamaized.net/rtvesec/int/tvei_eu_main.m3u8
+#EXTINF:-1 group-title="International",Zarok TV Sorani (720p)
+https://zindisorani.zaroktv.com.tr/hls/stream.m3u8
+#EXTINF:-1 group-title="Entertainment",Travel Channel
+https://dplus.gammacdn.workers.dev/videos/110.m3u8
+#EXTINF:-1 group-title="International",Arirang
+https://amdlive-ch03-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8
+#EXTINF:-1 group-title="News",Al Jazeera
+https://live-hls-web-aje.getaj.net/AJE/index.m3u8
+#EXTINF:-1 group-title="International",TV5 MONDE Style
+https://ott.tv5monde.com/Content/HLS/Live/channel(style1)/variant.m3u8
+#EXTINF:-1 group-title="News",Bloomberg Asia
+https://www.bloomberg.com/media-manifest/streams/asia.m3u8
+#EXTINF:-1 group-title="News",BBC World News
+https://vs-hls-push-ww-live.akamaized.net/x=4/i=urn:bbc:pips:service:bbc_news_channel_hd/t=3840/v=pv14/b=5070016/main.m3u8
+#EXTINF:-1 group-title="News",CGTN News
+https://news.cgtn.com/resource/live/english/cgtn-news.m3u8
+#EXTINF:-1 group-title="Documentary",CGTN Documentaries
+https://news.cgtn.com/resource/live/document/cgtn-doc.m3u8
+#EXTINF:-1 group-title="Documentary",Outdoor Channel
+https://cdn-apse1-prod.tsv2.amagi.tv/linear/amg00718-outdoorchannela-outdoortvnz-samsungnz/playlist.m3u8
+#EXTINF:-1 group-title="Documentary",Animal Planet
+https://dplus.gammacdn.workers.dev/videos/99.m3u8
+#EXTINF:-1 group-title="Entertainment",Thrillers
+https://amc-rushbyamc-1-us.vizio.wurl.tv/playlist.m3u8
+#EXTINF:-1 group-title="Entertainment",American Idol
+https://d2h3esqi6ab3e7.cloudfront.net/index.m3u8
+#EXTINF:-1 group-title="Entertainment",Baywatch
+https://d1ku2wsea2oun8.cloudfront.net/playlist.m3u8
+#EXTINF:-1 group-title="Sports",Bein Sports Xtra
+https://amg01334-beinsportsllc-beinxtra-localnow-kcy6r.amagi.tv/playlist.m3u8
+#EXTINF:-1 group-title="Movies",MovieSphere
+https://moviesphereuk-samsunguk.amagi.tv/playlist.m3u8
+#EXTINF:-1 group-title="Kids",3ABN Kids
+https://3abn.bozztv.com/3abn2/Kids_live/smil:Kids_live.smil/playlist.m3u8
+#EXTINF:-1 group-title="Entertainment",Blues TV
+https://2-fss-2.streamhoster.com/pl_138/205510-3094608-1/playlist.m3u8
+#EXTINF:-1 group-title="Entertainment",EnerGeek (720p) [Not 24/7]
+https://streaming-cl.sh1ny.space/memfs/e8a8e789-170b-4de4-a33b-90a9a475ce65.m3u8
+#EXTINF:-1 group-title="Entertainment",Fanpop TV
+https://streaming-cl.sh1ny.space/memfs/e16d2f72-70b5-4bf5-b9c5-107b6390a10f.m3u8
+#EXTINF:-1 group-title="Kids",Japanim TV (1080p)
+https://foxkidstv.be:3369/stream/play.m3u8
+#EXTINF:-1 group-title="Kids",Kuriakos Kids (1080p)
+https://w2.manasat.com/kkids/smil:kkids.smil/playlist.m3u8
+#EXTINF:-1 group-title="Kids",Magic Kids (486p)
+https://magicstream.ddns.net/magicstream/stream.m3u8
+#EXTINF:-1 group-title="Kids",Persiana Junior
+https://junhls.persiana.live/hls/stream.m3u8
+#EXTINF:-1 group-title="Kids",Retro Crush
+https://amg01201-cinedigmenterta-retrocrush-cineverse-nrfll.amagi.tv/playlist/amg01201-cinedigmenterta-retrocrush-cineverse/playlist.m3u8
+#EXTINF:-1 group-title="Kids",XilamTV (1080p) (English Subtitle)
+https://xilam-animation-1-fr.samsung.wurl.tv/playlist.m3u8
+#EXTINF:-1 group-title="Kids",Disney XD
+https://fl1.moveonjoy.com/DISNEY_XD/index.m3u8
+#EXTINF:-1 group-title="Kids",Disney Jr
+https://fl1.moveonjoy.com/DISNEY_JR/index.m3u8
+#EXTINF:-1 group-title="Kids",Disney Channel
+https://fl1.moveonjoy.com/DISNEY/index.m3u8
+#EXTINF:-1 group-title="Kids",Nickelodeon
+https://fl1.moveonjoy.com/NICKELODEON/index.m3u8
+#EXTINF:-1 group-title="Religion",TV Maria Philippines (720p)
+https://www.youtube.com/live/L-IgLRT2TD0?si=oZu8SvLA8a15CslU
+#EXTINF:-1 group-title="News",Yahoo! Finance (1080p)
+https://yahoo-samsung.amagi.tv/playlist.m3u8
+#EXTINF:-1 group-title="Religion",EWTN Europe (720p) [Not 24/7]
+https://cdn3.wowza.com/1//WFluRldQ/hls/live/playlist.m3u8
+#EXTINF:-1 group-title="Sports",NBA TV
+https://fl1.moveonjoy.com/NBA_TV/index.m3u8
+#EXTINF:-1 group-title="Philippines",Kapamilya Channel HD
+https://cdn-ue1-prod.tsv2.amagi.tv/linear/amg01006-abs-cbn-kapcha-dash-abscbnono/index.mpd
+#EXTINF:-1 group-title="Philippines",CineMo!
+https://cdn-ue1-prod.tsv2.amagi.tv/linear/amg01006-abs-cbn-cinemo-dash-abscbnono/index.mpd
+#EXTINF:-1 group-title="Movies",Cinema One
+https://cdn-ue1-prod.tsv2.amagi.tv/linear/amg01006-abs-cbn-cinemaone-dash-abscbnono/index.mpd
+#EXTINF:-1 group-title="Movies",Rakuten TV Action Movies
+https://54045f0c40fd442c8b06df076aaf1e85.mediatailor.eu-west-1.amazonaws.com/v1/master/0547f18649bd788bec7b67b746e47670f558b6b2/production-LiveChannel-6065/master.m3u8
+#EXTINF:-1 group-title="Philippines",Abante TV
+https://amg19223-amg19223c12-amgplt0352.playout.now3.amagi.tv/playlist/amg19223-amg19223c12-amgplt0352/playlist.m3u8
+`;
+
+            function parseM3UPlaylist(rawText, sourceTag = "m3u") {
+                const lines = String(rawText || "").split(/\r?\n/);
+                const parsed = [];
+                let pendingMeta = null;
+
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+
+                    if (line.startsWith("#EXTINF:")) {
+                        const logoMatch = line.match(/tvg-logo="([^"]*)"/i);
+                        const groupMatch = line.match(/group-title="([^"]*)"/i);
+                        const infoMatch = line.match(/info-url="([^"]*)"/i);
+
+                        const lastCommaIndex = line.lastIndexOf(",");
+                        let rawName = lastCommaIndex !== -1 ? line.slice(lastCommaIndex + 1).trim() : "Live Channel";
+                        if (!rawName) rawName = "Live Channel";
+
+                        pendingMeta = {
+                            name: rawName,
+                            logo: logoMatch ? logoMatch[1].trim() : "",
+                            group: groupMatch && groupMatch[1].trim() ? groupMatch[1].split(";")[0].trim() : "News",
+                            infoUrl: infoMatch ? infoMatch[1].trim() : ""
+                        };
+                    } else if (!line.startsWith("#")) {
+                        if (/^https?:\/\//i.test(line)) {
+                            const meta = pendingMeta || {
+                                name: `Stream ${parsed.length + 1}`,
+                                logo: "",
+                                group: "Live",
+                                infoUrl: ""
+                            };
+                            const slug = meta.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+                            parsed.push({
+                                id: `${slug || "ch"}-${parsed.length + 1}`,
+                                name: meta.name,
+                                logo: meta.logo,
+                                group: meta.group,
+                                infoUrl: meta.infoUrl || "",
+                                url: line,
+                                source: sourceTag
+                            });
+                        }
+                        pendingMeta = null;
+                    }
+                }
+
+                // Remove duplicate stream URLs while preserving playlist order.
+                const seenUrls = new Set();
+                return parsed.filter((channel) => {
+                    const key = String(channel.url || "").trim().toLowerCase();
+                    if (!key || seenUrls.has(key)) return false;
+                    seenUrls.add(key);
+                    return true;
+                });
+            }
+
+            /**
+             * Extracts a YouTube Video ID from standard, live, or short YouTube URLs.
+             */
+            function extractYouTubeId(url) {
+                const match = String(url || "").match(
+                    /(?:youtube\.com\/(?:watch\?v=|embed\/|live\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+                );
+                return match ? match[1] : null;
+            }
+
+            function loadJson(key, fallback) {
+                try {
+                    const raw = localStorage.getItem(key);
+                    return raw ? JSON.parse(raw) : fallback;
+                } catch (_) {
+                    return fallback;
+                }
+            }
+
+            function saveJson(key, value) {
+                try {
+                    localStorage.setItem(key, JSON.stringify(value));
+                } catch (_) {}
+            }
+
+            // Initialize Channels & Favorites State
+            let channels = loadJson(STORAGE_CHANNELS_KEY, null);
+            if (!Array.isArray(channels) || channels.length === 0) {
+                channels = parseM3UPlaylist(DEFAULT_M3U_RAW, "m3u");
+                saveJson(STORAGE_CHANNELS_KEY, channels);
+            }
+
+            let favorites = loadJson(STORAGE_FAVS_KEY, [
+                channels[0] ? channels[0].id : "",
+                channels[1] ? channels[1].id : "",
+                channels[2] ? channels[2].id : ""
+            ].filter(Boolean));
+
+            let activeChannelId = channels[0] ? channels[0].id : "";
+            let activeFilter = "all";
+            let searchQuery = "";
+            let hlsInstance = null;
+            let dashInstance = null;
+            let canvasAnimId = null;
+
+            // DOM References
+            const splashScreen = document.getElementById("splashScreen");
+            const mainApp = document.getElementById("mainApp");
+            const liveVideo = document.getElementById("liveVideo");
+            const youtubePlayer = document.getElementById("youtubePlayer");
+            const hlsQuickControls = document.getElementById("hlsQuickControls");
+            const playerBottomOverlay = document.getElementById("playerBottomOverlay");
+            const fallbackCanvas = document.getElementById("fallbackCanvas");
+            const playerStreamBadge = document.getElementById("playerStreamBadge");
+            const playerChannelNameOverlay = document.getElementById("playerChannelNameOverlay");
+            const playerStatusText = document.getElementById("playerStatusText");
+            const playerGroupTag = document.getElementById("playerGroupTag");
+            const activeChannelHeading = document.getElementById("activeChannelHeading");
+            const channelGuideLink = document.getElementById("channelGuideLink");
+            const channelCountLabel = document.getElementById("channelCountLabel");
+            const searchInput = document.getElementById("searchInput");
+            const clearSearchBtn = document.getElementById("clearSearchBtn");
+            const channelsGrid = document.getElementById("channelsGrid");
+            const emptyState = document.getElementById("emptyState");
+            const settingsModal = document.getElementById("settingsModal");
+            const tabEditUrlsPanel = document.getElementById("tabEditUrlsPanel");
+            const tabImportM3uPanel = document.getElementById("tabImportM3uPanel");
+            const toastEl = document.getElementById("toastNotification");
+
+            function showToast(msg) {
+                toastEl.textContent = msg;
+                toastEl.classList.remove("toast-exit");
+                toastEl.classList.add("toast-enter");
+                clearTimeout(showToast._timer);
+                showToast._timer = setTimeout(() => {
+                    toastEl.classList.remove("toast-enter");
+                    toastEl.classList.add("toast-exit");
+                }, 2500);
+            }
+
+            function escapeHtml(str) {
+                return String(str || "")
+                    .replace(/&/g, "&amp;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+            }
+
+            function getChannelInitials(name) {
+                const words = String(name || "TV").replace(/\([^)]*\)/g, "").trim().split(/\s+/);
+                if (words.length >= 2) {
+                    return (words[0][0] + words[1][0]).toUpperCase();
+                }
+                return words[0].slice(0, 3).toUpperCase();
+            }
+
+            function getChannelById(id) {
+                return channels.find((c) => c.id === id) || channels[0];
+            }
+
+            function startFallbackCanvas(channel, reasonText) {
+                liveVideo.classList.add("hidden");
+                youtubePlayer.classList.add("hidden");
+                youtubePlayer.src = "";
+                hlsQuickControls.classList.remove("hidden");
+                playerBottomOverlay.classList.remove("hidden");
+                fallbackCanvas.classList.remove("hidden");
+
+                playerStreamBadge.textContent = "Broadcast Preview";
+                playerStatusText.textContent = reasonText || "Stream offline or restricted — showing live visualizer";
+
+                if (canvasAnimId) cancelAnimationFrame(canvasAnimId);
+
+                const ctx = fallbackCanvas.getContext("2d");
+                let tick = 0;
+
+                function renderFrame() {
+                    const parent = fallbackCanvas.parentElement;
+                    const w = parent ? parent.clientWidth : 640;
+                    const h = parent ? parent.clientHeight : 360;
+                    if (fallbackCanvas.width !== w || fallbackCanvas.height !== h) {
+                        fallbackCanvas.width = w;
+                        fallbackCanvas.height = h;
+                    }
+
+                    tick += 0.025;
+                    const grad = ctx.createLinearGradient(0, 0, w, h);
+                    grad.addColorStop(0, "#090f1d");
+                    grad.addColorStop(0.5, "#160f24");
+                    grad.addColorStop(1, "#080b12");
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(0, 0, w, h);
+
+                    const cx = w * 0.5;
+                    const cy = h * 0.44;
+                    for (let i = 1; i <= 3; i++) {
+                        const radius = ((tick * 28 + i * 32) % 130) + 18;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+                        ctx.strokeStyle = i % 2 === 0
+                            ? `rgba(41, 151, 255, ${Math.max(0, 0.38 - radius / 380)})`
+                            : `rgba(239, 35, 60, ${Math.max(0, 0.38 - radius / 380)})`;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+                    ctx.font = `800 ${Math.max(18, Math.round(w * 0.042))}px Inter, sans-serif`;
+                    ctx.textAlign = "center";
+                    ctx.fillText(channel.name.toUpperCase(), cx, cy + 6);
+
+                    ctx.fillStyle = "rgba(156, 163, 175, 0.85)";
+                    ctx.font = `500 ${Math.max(11, Math.round(w * 0.02))}px Inter, sans-serif`;
+                    ctx.fillText("LIVE SIGNAL STANDBY", cx, cy + 28);
+
+                    canvasAnimId = requestAnimationFrame(renderFrame);
+                }
+
+                renderFrame();
+            }
+
+            function stopFallbackCanvas() {
+                if (canvasAnimId) {
+                    cancelAnimationFrame(canvasAnimId);
+                    canvasAnimId = null;
+                }
+                fallbackCanvas.classList.add("hidden");
+            }
+
+            function destroyHls() {
+                if (hlsInstance) {
+                    hlsInstance.destroy();
+                    hlsInstance = null;
+                }
+                liveVideo.pause();
+                liveVideo.removeAttribute("src");
+                liveVideo.load();
+            }
+
+            function updatePlayPauseIcon() {
+                const icon = document.getElementById("playPauseIcon");
+                if (liveVideo.paused) {
+                    icon.innerHTML = `<path d="M8 5v14l11-7z"/>`;
+                } else {
+                    icon.innerHTML = `<path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z"/>`;
+                }
+            }
+
+            function updateMuteIcon() {
+                const icon = document.getElementById("muteIcon");
+                if (liveVideo.muted) {
+                    icon.innerHTML = `
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                    `;
+                } else {
+                    icon.innerHTML = `
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    `;
+                }
+            }
+
+            /**
+             * Plays YouTube Live embeds, HLS (.m3u8) streams, or canvas fallback.
+             */
+            function playChannel(channelId) {
+                const channel = getChannelById(channelId);
+                if (!channel) return;
+
+                activeChannelId = channel.id;
+                activeChannelHeading.textContent = channel.name;
+                playerChannelNameOverlay.textContent = channel.name;
+                playerGroupTag.textContent = channel.group || "Live";
+
+                if (channel.infoUrl) {
+                    channelGuideLink.href = channel.infoUrl;
+                    channelGuideLink.classList.remove("hidden");
+                } else {
+                    channelGuideLink.classList.add("hidden");
+                }
+
+                const streamUrl = (channel.url || "").trim();
+                destroyHls();
+                if (dashInstance) { dashInstance.reset(); dashInstance = null; }
+                stopFallbackCanvas();
+                renderChannels();
+
+                if (!streamUrl) {
+                    startFallbackCanvas(channel, "No stream URL set — configure in Settings");
+                    return;
+                }
+
+                // Check if URL is a YouTube Live or Video link
+                const ytId = extractYouTubeId(streamUrl);
+                if (ytId) {
+                    liveVideo.classList.add("hidden");
+                    hlsQuickControls.classList.add("hidden");
+                    playerBottomOverlay.classList.add("hidden");
+                    youtubePlayer.classList.remove("hidden");
+
+                    playerStreamBadge.textContent = "YouTube Live";
+                    playerStatusText.textContent = "Playing YouTube Live stream";
+                    youtubePlayer.src = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=0&rel=0&modestbranding=1&playsinline=1`;
+                    return;
+                }
+
+                // Otherwise configure standard HLS Video Player
+                youtubePlayer.classList.add("hidden");
+                youtubePlayer.src = "";
+                liveVideo.classList.remove("hidden");
+                hlsQuickControls.classList.remove("hidden");
+                playerBottomOverlay.classList.remove("hidden");
+
+                if (window.location.protocol === "https:" && streamUrl.startsWith("http://")) {
+                    startFallbackCanvas(channel, "HTTP stream blocked on HTTPS page — open file locally to play");
+                    return;
+                }
+                if (/\\.mpd($|[?#])/i.test(streamUrl)) {
+                    if (!window.dashjs || !window.dashjs.MediaPlayer) {
+                        startFallbackCanvas(channel, "DASH player library unavailable");
+                        return;
+                    }
+                    playerStreamBadge.textContent = "MPEG-DASH";
+                    playerStatusText.textContent = "Connecting to DASH stream...";
+                    dashInstance = window.dashjs.MediaPlayer().create();
+                    dashInstance.initialize(liveVideo, streamUrl, true);
+                    dashInstance.on(window.dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+                        playerStatusText.textContent = "Playing live stream";
+                        liveVideo.play().then(updatePlayPauseIcon).catch(updatePlayPauseIcon);
+                    });
+                    dashInstance.on(window.dashjs.MediaPlayer.events.ERROR, () => {
+                        if (dashInstance) { dashInstance.reset(); dashInstance = null; }
+                        startFallbackCanvas(channel, "DASH stream offline, restricted, or unsupported");
+                    });
+                    return;
+                }
+
+                playerStreamBadge.textContent = "HLS .m3u8";
+                playerStatusText.textContent = `Connecting: ${streamUrl}`;
+
+                if (window.Hls && window.Hls.isSupported()) {
+                    const hls = new window.Hls({
+                        enableWorker: true,
+                        lowLatencyMode: true
+                    });
+                    hlsInstance = hls;
+                    hls.loadSource(streamUrl);
+                    hls.attachMedia(liveVideo);
+
+                    hls.on(window.Hls.Events.MANIFEST_PARSED, function (_event, data) {
+                        const levels = data && data.levels ? data.levels : [];
+                        const topHeight = levels.length ? Math.max(...levels.map((l) => l.height || 0)) : 0;
+                        playerStreamBadge.textContent = topHeight ? `HLS ${topHeight}p` : "HLS LIVE";
+                        playerStatusText.textContent = `Playing live stream`;
+                        liveVideo.play().then(updatePlayPauseIcon).catch(() => {
+                            playerStatusText.textContent = "Tap Play button to start video";
+                            updatePlayPauseIcon();
+                        });
+                    });
+
+                    hls.on(window.Hls.Events.ERROR, function (_event, data) {
+                        if (data && data.fatal) {
+                            destroyHls();
+                            startFallbackCanvas(channel, "Stream offline or CORS-blocked — showing live preview");
+                        }
+                    });
+                } else if (liveVideo.canPlayType("application/vnd.apple.mpegurl")) {
+                    liveVideo.src = streamUrl;
+                    liveVideo.addEventListener("loadedmetadata", function onMeta() {
+                        liveVideo.removeEventListener("loadedmetadata", onMeta);
+                        playerStatusText.textContent = "Playing live stream";
+                        liveVideo.play().then(updatePlayPauseIcon).catch(updatePlayPauseIcon);
+                    });
+                    liveVideo.addEventListener("error", function onErr() {
+                        liveVideo.removeEventListener("error", onErr);
+                        startFallbackCanvas(channel, "Stream offline or blocked — showing live preview");
+                    });
+                } else {
+                    startFallbackCanvas(channel, "HLS playback unsupported in this browser");
+                }
+            }
+
+            function toggleFavorite(channelId, event) {
+                if (event) event.stopPropagation();
+                const idx = favorites.indexOf(channelId);
+                if (idx >= 0) {
+                    favorites.splice(idx, 1);
+                    showToast("Removed from Favorites");
+                } else {
+                    favorites.push(channelId);
+                    showToast("Added to Favorites");
+                }
+                saveJson(STORAGE_FAVS_KEY, favorites);
+                renderChannels();
+            }
+
+            function renderChannels() {
+                const q = searchQuery.trim().toLowerCase();
+                const filtered = channels.filter((ch) => {
+                    const matchesQuery = !q
+                        || ch.name.toLowerCase().includes(q)
+                        || (ch.group && ch.group.toLowerCase().includes(q));
+
+                    if (!matchesQuery) return false;
+                    if (activeFilter === "favorites") return favorites.includes(ch.id);
+                    if (activeFilter === "ph_news") {
+                        return /ph|philippines|korean|sports|abante|abs-cbn|kapamilya|cinema|viva|philippine/i.test(`${ch.name} ${ch.group}`);
+                    }
+                    if (activeFilter === "m3u") {
+                        return ch.source === "m3u";
+                    }
+                    return true;
+                });
+
+                channelCountLabel.textContent = `${filtered.length} ${filtered.length === 1 ? "Channel" : "Channels"}`;
+
+                if (filtered.length === 0) {
+                    channelsGrid.innerHTML = "";
+                    emptyState.classList.remove("hidden");
+                    return;
+                }
+
+                emptyState.classList.add("hidden");
+                channelsGrid.innerHTML = filtered.map((ch) => {
+                    const isActive = ch.id === activeChannelId;
+                    const isFav = favorites.includes(ch.id);
+                    const initials = getChannelInitials(ch.name);
+
+                    return `
+                        <div data-channel-id="${escapeHtml(ch.id)}"
+                            class="channel-card group cursor-pointer rounded-2xl p-3 bg-[#111215] border transition-all duration-200 flex flex-col justify-between ${
+                                isActive
+                                    ? "border-[#2997ff] ring-2 ring-[#2997ff]/30 bg-[#141822]"
+                                    : "border-white/10 hover:border-white/25 hover:bg-[#16181e]"
+                            }">
+                            <div class="relative w-full aspect-[16/9] rounded-xl overflow-hidden bg-gradient-to-br from-[#161a24] to-[#0b0c10] mb-2.5 flex items-center justify-center p-2.5">
+                                ${ch.logo ? `
+                                    <img src="${escapeHtml(ch.logo)}" alt="${escapeHtml(ch.name)}" loading="lazy"
+                                        onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');"
+                                        class="max-w-full max-h-full object-contain drop-shadow" />
+                                ` : ""}
+                                <div class="${ch.logo ? "hidden" : ""} w-full h-full flex flex-col items-center justify-center text-center">
+                                    <span class="text-lg sm:text-xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-[#2997ff] to-[#ef233c]">
+                                        ${escapeHtml(initials)}
+                                    </span>
+                                </div>
+                                <span class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 text-[10px] font-semibold text-gray-300 border border-white/10">
+                                    ${escapeHtml(ch.group || "LIVE")}
+                                </span>
+                            </div>
+
+                            <div class="flex items-center justify-between gap-1.5">
+                                <span class="text-xs sm:text-sm font-semibold text-white truncate" title="${escapeHtml(ch.name)}">
+                                    ${escapeHtml(ch.name)}
+                                </span>
+                                <button type="button" data-fav-id="${escapeHtml(ch.id)}" aria-label="Favorite ${escapeHtml(ch.name)}"
+                                    class="fav-btn p-1.5 rounded-lg hover:bg-white/10 transition shrink-0 ${isFav ? "text-amber-400" : "text-gray-400 hover:text-white"}">
+                                    <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="${isFav ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+
+                channelsGrid.querySelectorAll(".channel-card").forEach((card) => {
+                    card.addEventListener("click", () => {
+                        const cid = card.getAttribute("data-channel-id");
+                        playChannel(cid);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                    });
+                });
+
+                channelsGrid.querySelectorAll(".fav-btn").forEach((btn) => {
+                    btn.addEventListener("click", (e) => {
+                        const fid = btn.getAttribute("data-fav-id");
+                        toggleFavorite(fid, e);
+                    });
+                });
+            }
+
+            function renderSettingsUrlList() {
+                tabEditUrlsPanel.innerHTML = channels.map((ch) => `
+                    <div class="p-3 rounded-xl bg-[#0b0c0f] border border-white/10 space-y-2">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-sm font-bold text-white truncate">${escapeHtml(ch.name)}</span>
+                            <span class="text-[11px] text-gray-400 shrink-0">${escapeHtml(ch.group || "Live")}</span>
+                        </div>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input type="url" data-url-input="${escapeHtml(ch.id)}" value="${escapeHtml(ch.url)}"
+                                placeholder="https://example.com/stream.m3u8"
+                                class="flex-1 px-3 py-2 rounded-xl bg-[#14161c] border border-white/10 focus:border-[#2997ff] focus:outline-none text-xs text-gray-100 placeholder-gray-500" />
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <button type="button" data-save-url="${escapeHtml(ch.id)}"
+                                    class="px-3 py-2 rounded-xl text-xs font-semibold bg-[#2997ff]/20 hover:bg-[#2997ff]/30 text-[#60b0ff] border border-[#2997ff]/30 transition">
+                                    Save
+                                </button>
+                                <button type="button" data-play-url="${escapeHtml(ch.id)}"
+                                    class="px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition">
+                                    Play
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join("");
+
+                tabEditUrlsPanel.querySelectorAll("[data-save-url]").forEach((btn) => {
+                    btn.addEventListener("click", () => {
+                        const cid = btn.getAttribute("data-save-url");
+                        const input = tabEditUrlsPanel.querySelector(`[data-url-input="${cid}"]`);
+                        const ch = getChannelById(cid);
+                        if (ch && input) {
+                            ch.url = input.value.trim();
+                            saveJson(STORAGE_CHANNELS_KEY, channels);
+                            renderChannels();
+                            if (ch.id === activeChannelId) playChannel(ch.id);
+                            showToast(`Saved URL for ${ch.name}`);
+                        }
+                    });
+                });
+
+                tabEditUrlsPanel.querySelectorAll("[data-play-url]").forEach((btn) => {
+                    btn.addEventListener("click", () => {
+                        const cid = btn.getAttribute("data-play-url");
+                        const input = tabEditUrlsPanel.querySelector(`[data-url-input="${cid}"]`);
+                        const ch = getChannelById(cid);
+                        if (ch && input) {
+                            ch.url = input.value.trim();
+                            saveJson(STORAGE_CHANNELS_KEY, channels);
+                            closeSettingsModal();
+                            playChannel(ch.id);
+                        }
+                    });
+                });
+            }
+
+            function switchSettingsTab(tabName) {
+                const editTabBtn = document.getElementById("tabEditUrlsBtn");
+                const importTabBtn = document.getElementById("tabImportM3uBtn");
+
+                if (tabName === "import") {
+                    tabEditUrlsPanel.classList.add("hidden");
+                    tabImportM3uPanel.classList.remove("hidden");
+                    importTabBtn.classList.add("border-[#2997ff]", "text-white");
+                    importTabBtn.classList.remove("border-transparent", "text-gray-400");
+                    editTabBtn.classList.remove("border-[#2997ff]", "text-white");
+                    editTabBtn.classList.add("border-transparent", "text-gray-400");
+                } else {
+                    tabImportM3uPanel.classList.add("hidden");
+                    tabEditUrlsPanel.classList.remove("hidden");
+                    editTabBtn.classList.add("border-[#2997ff]", "text-white");
+                    editTabBtn.classList.remove("border-transparent", "text-gray-400");
+                    importTabBtn.classList.remove("border-[#2997ff]", "text-white");
+                    importTabBtn.classList.add("border-transparent", "text-gray-400");
+                }
+            }
+
+            function openSettingsModal(defaultTab = "urls") {
+                renderSettingsUrlList();
+                switchSettingsTab(defaultTab);
+                settingsModal.classList.remove("hidden");
+                settingsModal.classList.add("flex");
+            }
+
+            function closeSettingsModal() {
+                settingsModal.classList.add("hidden");
+                settingsModal.classList.remove("flex");
+            }
+
+            function dismissSplash() {
+                if (splashScreen.classList.contains("hidden")) return;
+                splashScreen.style.opacity = "0";
+                mainApp.classList.remove("opacity-0");
+                setTimeout(() => {
+                    splashScreen.classList.add("hidden");
+                }, 450);
+            }
+
+            // UI Event Listeners
+            document.getElementById("skipSplashBtn").addEventListener("click", dismissSplash);
+
+            document.getElementById("homeLogoBtn").addEventListener("click", () => {
+                if (channels[0]) {
+                    playChannel(channels[0].id);
+                    showToast(`Switched to ${channels[0].name}`);
+                }
+            });
+
+            document.getElementById("refreshStreamBtn").addEventListener("click", () => {
+                const icon = document.getElementById("refreshIcon");
+                icon.classList.add("animate-spin");
+                setTimeout(() => icon.classList.remove("animate-spin"), 600);
+                playChannel(activeChannelId);
+                showToast("Reloading live stream...");
+            });
+
+            document.getElementById("openSettingsBtn").addEventListener("click", () => openSettingsModal("urls"));
+            document.getElementById("quickAddM3uBtn").addEventListener("click", () => openSettingsModal("import"));
+            document.getElementById("closeSettingsBtn").addEventListener("click", closeSettingsModal);
+            document.getElementById("doneSettingsBtn").addEventListener("click", closeSettingsModal);
+
+            document.getElementById("tabEditUrlsBtn").addEventListener("click", () => switchSettingsTab("urls"));
+            document.getElementById("tabImportM3uBtn").addEventListener("click", () => switchSettingsTab("import"));
+
+            settingsModal.addEventListener("click", (e) => {
+                if (e.target === settingsModal) closeSettingsModal();
+            });
+
+            // Add Single Custom Channel
+            document.getElementById("addSingleChannelBtn").addEventListener("click", () => {
+                const nameInput = document.getElementById("customChName");
+                const groupInput = document.getElementById("customChGroup");
+                const urlInput = document.getElementById("customChUrl");
+
+                const name = nameInput.value.trim();
+                const group = groupInput.value.trim() || "PH & Sports";
+                const url = urlInput.value.trim();
+
+                if (!name || !url) {
+                    showToast("Please enter both a channel name and stream URL");
+                    return;
+                }
+
+                const newCh = {
+                    id: `custom-${Date.now()}`,
+                    name,
+                    logo: "",
+                    group,
+                    infoUrl: "",
+                    url,
+                    source: "m3u"
+                };
+
+                channels.unshift(newCh);
+                saveJson(STORAGE_CHANNELS_KEY, channels);
+                nameInput.value = "";
+                groupInput.value = "";
+                urlInput.value = "";
+
+                renderChannels();
+                closeSettingsModal();
+                playChannel(newCh.id);
+                showToast(`Added and playing ${newCh.name}`);
+            });
+
+            // Append or Replace Raw #EXTM3U Playlist
+            document.getElementById("appendM3uBtn").addEventListener("click", () => {
+                const raw = document.getElementById("rawM3uInput").value.trim();
+                const imported = parseM3UPlaylist(raw, "m3u");
+                if (imported.length === 0) {
+                    showToast("No valid stream URLs found in pasted M3U text");
+                    return;
+                }
+                const stamp = Date.now();
+                imported.forEach((item, idx) => {
+                    item.id = `${item.id}-${stamp}-${idx}`;
+                });
+                channels = [...imported, ...channels];
+                saveJson(STORAGE_CHANNELS_KEY, channels);
+                document.getElementById("rawM3uInput").value = "";
+                renderChannels();
+                closeSettingsModal();
+                playChannel(imported[0].id);
+                showToast(`Appended ${imported.length} channels`);
+            });
+
+            document.getElementById("replaceM3uBtn").addEventListener("click", () => {
+                const raw = document.getElementById("rawM3uInput").value.trim();
+                const imported = parseM3UPlaylist(raw, "m3u");
+                if (imported.length === 0) {
+                    showToast("No valid stream URLs found in pasted M3U text");
+                    return;
+                }
+                channels = imported;
+                saveJson(STORAGE_CHANNELS_KEY, channels);
+                document.getElementById("rawM3uInput").value = "";
+                renderChannels();
+                closeSettingsModal();
+                playChannel(channels[0].id);
+                showToast(`Loaded ${channels.length} channels from M3U`);
+            });
+
+            document.getElementById("resetAllBtn").addEventListener("click", () => {
+                channels = parseM3UPlaylist(DEFAULT_M3U_RAW, "m3u");
+                saveJson(STORAGE_CHANNELS_KEY, channels);
+                renderSettingsUrlList();
+                renderChannels();
+                if (channels[0]) playChannel(channels[0].id);
+                showToast("Reset to default M3U playlist");
+            });
+
+            // Video Controls
+            document.getElementById("playPauseBtn").addEventListener("click", () => {
+                if (liveVideo.paused) {
+                    liveVideo.play().then(updatePlayPauseIcon).catch(() => {});
+                } else {
+                    liveVideo.pause();
+                    updatePlayPauseIcon();
+                }
+            });
+
+            document.getElementById("muteToggleBtn").addEventListener("click", () => {
+                liveVideo.muted = !liveVideo.muted;
+                updateMuteIcon();
+                showToast(liveVideo.muted ? "Audio muted" : "Audio unmuted");
+            });
+
+            document.getElementById("fullscreenBtn").addEventListener("click", () => {
+                const container = document.getElementById("playerContainer");
+                if (!document.fullscreenElement && container && container.requestFullscreen) {
+                    container.requestFullscreen().catch(() => {});
+                } else if (document.fullscreenElement && document.exitFullscreen) {
+                    document.exitFullscreen().catch(() => {});
+                }
+            });
+
+            liveVideo.addEventListener("play", updatePlayPauseIcon);
+            liveVideo.addEventListener("pause", updatePlayPauseIcon);
+
+            // Search & Filter Pills
+            searchInput.addEventListener("input", (e) => {
+                searchQuery = e.target.value || "";
+                clearSearchBtn.classList.toggle("hidden", !searchQuery);
+                renderChannels();
+            });
+
+            clearSearchBtn.addEventListener("click", () => {
+                searchInput.value = "";
+                searchQuery = "";
+                clearSearchBtn.classList.add("hidden");
+                renderChannels();
+            });
+
+            document.querySelectorAll(".filter-pill").forEach((pill) => {
+                pill.addEventListener("click", () => {
+                    activeFilter = pill.getAttribute("data-filter") || "all";
+                    document.querySelectorAll(".filter-pill").forEach((btn) => {
+                        if (btn === pill) {
+                            btn.className = "filter-pill px-5 py-2.5 rounded-full text-sm font-semibold bg-[#ef233c] text-white shadow transition";
+                        } else {
+                            btn.className = "filter-pill px-5 py-2.5 rounded-full text-sm font-semibold bg-transparent border border-white/15 text-gray-300 hover:border-white/30 hover:text-white transition";
+                        }
+                    });
+                    renderChannels();
+                });
+            });
+
+            // Initialize App on Load
+            window.addEventListener("DOMContentLoaded", () => {
+                updateMuteIcon();
+                renderChannels();
+                if (channels[0]) {
+                    playChannel(channels[0].id);
+                }
+
+                setTimeout(dismissSplash, 1850);
+            });
+        })();
+    </script>
+</body>
+</html>
