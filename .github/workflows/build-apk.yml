@@ -1,10 +1,55 @@
 
-ph-live-tv/
-├── .github/
-│   └── workflows/
-│       └── build-apk.yml
-├── www/
-│   └── index.html
-├── package.json
-├── capacitor.config.json
-└── README.md
+name: Build Ph.Live Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare web assets
+        run: |
+          mkdir -p www
+          cp index.html www/index.html
+
+      - name: Install Capacitor
+        run: |
+          npm init -y
+          npm install @capacitor/core@^7.4.3 @capacitor/cli@^7.4.3 @capacitor/android@^7.4.3
+
+      - name: Initialize Android project
+        run: |
+          npx cap init "Ph.Live" "com.phlive.tv" --web-dir www
+          npx cap add android
+          npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ph-Live-debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
